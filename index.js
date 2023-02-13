@@ -17,4 +17,3 @@ bot.help((ctx) => {
 });
 
 bot.launch();
-
