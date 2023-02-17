@@ -1,6 +1,10 @@
-const { Markup, Extra } = require("telegraf");
+const { Markup, Telegraf } = require("telegraf");
 
 const utils = require("../utils/utils.js");
+
+const professions = require("../utils/professionObjects.js").profession;
+
+const jobExperience = require("../utils/professionObjects.js").jobExperienses;
 
 async function registerAccount(bot, ctx, db) {
   let registrationDate = new Date();
@@ -14,23 +18,19 @@ async function registerAccount(bot, ctx, db) {
 
   await ctx.reply(
     `${user.name}, id: ${user.id}`,
-    Extra.markup(
-      Markup.inlineKeyboard([
-        [Markup.callbackButton("О проекте", "bot_about")],
-        [Markup.callbackButton("Регистрация", `bot_registration`)],
-      ])
-    )
+    Markup.inlineKeyboard([
+      [Markup.button.callback("О проекте", "bot_about")],
+      [Markup.button.callback("Регистрация", `bot_registration`)],
+    ])
   );
 
   bot.action(`bot_registration`, (ctx) => {
     utils.removeInlineKeyboard(ctx);
     ctx.reply(
       "Правила проекта",
-      Extra.markup(
-        Markup.inlineKeyboard([
-          [Markup.callbackButton("Принять", `accept_${user.id}`)],
-        ])
-      )
+      Markup.inlineKeyboard([
+        [Markup.button.callback("Принять", `accept_${user.id}`)],
+      ])
     );
   });
 
@@ -38,35 +38,104 @@ async function registerAccount(bot, ctx, db) {
     user.acceptRules = "accepted";
     utils.removeInlineKeyboard(ctx);
     ctx.reply(
-      "выбор направления",
-      Extra.markup(
-        Markup.inlineKeyboard([
-          [Markup.callbackButton("Направление 1", `specify1_${user.id}`)],
-          [Markup.callbackButton("Направление 2", `specify2_${user.id}`)],
-          [Markup.callbackButton("Направление 3", `specify3_${user.id}`)],
-          [Markup.callbackButton("Направление 4", `specify4_${user.id}`)],
-        ])
-      )
+      "вы кто",
+      Markup.inlineKeyboard([
+        [Markup.button.callback("Я исполнитель", "bot_registration_worker")],
+        [Markup.button.callback("Я заказчик", "bot_registration_boss")],
+      ])
     );
+  });
 
-    for (let i = 1; i < 5; i++) {
-      bot.action(`specify${i}_${user.id}`, (ctx) => {
-        user.profession = `specify${i}`;
+  bot.action("bot_registration_worker", (ctx) => {
+    utils.removeInlineKeyboard(ctx);
+    user.role = "worker";
+    ctx.reply(
+      "выбор направления",
+      Markup.inlineKeyboard(utils.createButtons(professions))
+    );
+  });
+
+  bot.action("bot_registration_boss", (ctx) => {
+    utils.removeInlineKeyboard(ctx);
+    user.role = "boss";
+    ctx.reply("хорошо");
+  });
+
+  professions.forEach((profession) => {
+    bot.action(profession.module, (ctx) => {
+      utils.removeInlineKeyboard(ctx);
+      const buttonsData = utils.createButtons(profession.jobs);
+      buttonsData.push([Markup.button.callback("Назад", `accept_${user.id}`)]);
+      ctx.reply("направления", Markup.inlineKeyboard(buttonsData));
+    });
+
+    profession.jobs.forEach((job) => {
+      bot.action(job.module, (ctx) => {
         utils.removeInlineKeyboard(ctx);
-        db.setUserData(user);
         ctx.reply(
-          "выберите опыт работы",
-          Extra.markup(
-            Markup.inlineKeyboard([
-              [Markup.callbackButton("<1м", `experience1_${user.id}`)],
-              [Markup.callbackButton("<5м", `experience2_${user.id}`)],
-              [Markup.callbackButton("<1г", `experience3_${user.id}`)],
-              [Markup.callbackButton("<3г", `experience4_${user.id}`)],
-            ])
-          )
+          `Выбран ${job.name}. Правильно?`,
+          Markup.inlineKeyboard([
+            utils.confirmChosenOption(job.name, profession.module),
+          ])
         );
       });
-    }
+
+      bot.action(`chosen_${job.name}`, (ctx) => {
+        user.profession = job.name;
+        utils.removeInlineKeyboard(ctx);
+        ctx.reply(
+          "выберите опыт работы",
+          Markup.inlineKeyboard(utils.createButtons(jobExperience))
+        );
+      });
+
+      jobExperience.forEach((experience) => {
+        bot.action(experience.module, (ctx) => {
+          utils.removeInlineKeyboard(ctx);
+          ctx.reply(
+            `опыт ${experience.name}`,
+            Markup.inlineKeyboard(
+              utils.confirmChosenOption(experience.name, `chosen_${job.name}`)
+            )
+          );
+        });
+
+        bot.action(`chosen_${experience.name}`, (ctx) => {
+          user.experience = experience.name;
+          utils.removeInlineKeyboard(ctx);
+          ctx.reply(`отправьте ссылку на свое портфолио`);
+        });
+
+        bot.hears(/https:/gm, (ctx) => {
+          user.portfolio = ctx.message.text;
+          ctx.reply(
+            "отправить анкету на модерацию?",
+            Markup.inlineKeyboard([
+              Markup.button.callback("Отправить", "registration_finish"),
+              Markup.button.callback("Отмена", "registration_aborted"),
+            ])
+          );
+        });
+
+        bot.hears(/http:/gm, (ctx) => {
+          ctx.reply(
+            "Вы отправляете ссылку с протоколом HTTP. убедитесь, что сайт, на который вы ссылаетесь, защищен протоколом SSL."
+          );
+        });
+      });
+    });
+  });
+
+  bot.action("registration_finish", (ctx) => {
+    user.onModeration = true;
+    db.setUserData(user);
+    ctx.reply("Анкета успешно отправлена на проверку");
+  });
+
+  bot.action("registration_aborted", (ctx) => {
+    user.onModeration = aborted;
+    db.setUserData(user);
+    ctx.reply("Регистрация прервана");
   });
 
   utils.handleButtonCallback(bot, "bot_about", "о проекте");
